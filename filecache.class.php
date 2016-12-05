@@ -38,7 +38,6 @@ class FilecacheCache implements BackdropCacheInterface {
    * Implements BackdropCacheInterface::get().
    */
   function get($cid) {
-
     $cid = $this->prepareCid($cid);
     if (file_exists($this->directory . '/' . $cid . '.php')) {
       include $this->directory . '/' . $cid . '.php';
@@ -108,9 +107,12 @@ class FilecacheCache implements BackdropCacheInterface {
 
       if($expire === CACHE_PERMANENT) {
         file_put_contents($filename, $data, LOCK_EX);
+        backdrop_chmod($filename);
       } else {
         file_put_contents($filename, $data, LOCK_EX);
+        backdrop_chmod($filename);
         file_put_contents($filename . '.expire', $expire, LOCK_EX);
+        backdrop_chmod($filename);
       }
     }
     catch (Exception $e) {
@@ -145,7 +147,13 @@ class FilecacheCache implements BackdropCacheInterface {
    * Implements BackdropCacheInterface::deletePrefix().
    */
   function deletePrefix($prefix) {
-//    Filecache_unset_by_prefix($this->bin . ':' . $prefix);
+    if (!function_exists('file_scan_directory')) {
+      require_once BACKDROP_ROOT . '/core/includes/file.inc';
+    }
+    $expire_files = file_scan_directory($this->directory, '/^' . $prefix . '.*/');
+    foreach($expire_files as $file) {
+      unlink($file->uri);
+    }
   }
 
   /**
