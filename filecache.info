@@ -1,0 +1,5 @@
+name = Filecache
+description = Custom cache override for better performance and reduced database load.
+package = "Cache"
+backdrop = 1.x
+type = module
