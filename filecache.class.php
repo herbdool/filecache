@@ -152,7 +152,7 @@ class FilecacheCache implements BackdropCacheInterface {
    */
   protected function prepareItem($cache) {
     $item = new stdClass();
-    if (!$item->data = @unserialize($cache)){
+    if (!$item->data = @unserialize(base64_decode($cache))){
       return FALSE;
     }
     return $item;
@@ -211,7 +211,7 @@ class FilecacheCache implements BackdropCacheInterface {
   function set($cid, $data, $expire = CACHE_PERMANENT) {
     $cid = $this->prepareCid($cid);
     try {
-      $data = '<?php $cached_data=\'' . str_replace("'", "\'", serialize($data)) . '\';';
+      $data = '<?php $cached_data=\'' . base64_encode(serialize($data)) . '\';';
       $filename = $this->directory . '/' . $cid . '.php';
 
       file_put_contents($filename, $data, LOCK_EX);
