@@ -1,6 +1,26 @@
 <?php
 
 /**
+ * @file
+ * FilecacheCache class
+ */
+
+/**
+ * Max filename length for cid.
+ *
+ * Doesn't include cache bin prefix. Must be at least 34 (see
+ * FILECACHE_CID_FILENAME_POS_BEFORE_MD5).
+ */
+define('FILECACHE_CID_FILENAME_MAX', 200);
+
+/**
+ * Cut point between not MD5 encoded and MD5 encoded.
+ *
+ * 34 is '%_' + 32 hexdigits for 128-bit MD5
+ */
+define('FILECACHE_CID_FILENAME_POS_BEFORE_MD5', FILECACHE_CID_FILENAME_MAX - 34);
+
+/**
  * Defines a Filecache cache implementation.
  *
  * Use Directory as a bin and file as a cache file.
@@ -161,30 +181,28 @@ class FilecacheCache implements BackdropCacheInterface {
   }
 
   /**
-   * Normalizes a cache ID in order to comply with file naming limitations.
-   *
-   * There are many different file systems in use on web servers. In order to
-   * maximize compatibility we will use filenames that only include alphanumeric
-   * characters, hyphens and underscores.
+   * Normalizes a cache ID so it is usable for file name.
    *
    * @param string $cid
-   *   The passed in cache ID.
-   *
+   *   Cache ID.
    * @return string
-   *   An cache ID consisting of alphanumeric characters, hyphens and
-   *   underscores.
+   *   String that is derived from $cid and can be used as file name.
    */
-  protected function prepareCid(string $cid): string {
-    // Replace some common characters to keep more filenames legible.
-    $cid = str_replace(array('/', '%', ':', '.', '=', '?', '@'), '-', $cid);
-
-    // Nothing to do if the ID is already valid.
-    $cid_uses_valid_characters = (bool) preg_match('/^[a-zA-Z0-9_-]+$/', $cid);
-    if ($cid_uses_valid_characters) {
-      return $cid;
+  function prepareCid(string $cid): string {
+    // Use urlencode(), but turn the
+    // encoded ':' and '/' back into ordinary characters since they're used so
+    // often. (Especially ':', but '/' is used in cache_menu.)
+    // We can't turn them back into their own characters though; both are
+    // considered unsafe in filenames. So turn ':' -> '@' and '/' -> '='
+    $safe_cid = str_replace(array('%3A', '%2F'), array('@', '='), urlencode($cid));
+    if (strlen($safe_cid) > FILECACHE_CID_FILENAME_MAX) {
+      $safe_cid =
+        substr($safe_cid, 0, FILECACHE_CID_FILENAME_POS_BEFORE_MD5) .
+        ',' .
+        md5(substr($safe_cid, FILECACHE_CID_FILENAME_POS_BEFORE_MD5));
     }
-    // Return a hash of the original cache ID.
-    return backdrop_hash_base64($cid);
+
+    return $safe_cid;
   }
 
   /**
@@ -214,17 +232,14 @@ class FilecacheCache implements BackdropCacheInterface {
    * Implements BackdropCacheInterface::delete().
    */
   function delete($cid) {
-    $cid = $this->prepareCid($cid);
-    $filename = $this->directory . '/' . $cid . '.php';
-    if (is_file($filename)) {
-      unlink($filename);
+    // Entity cache passes in an array instead of a single ID.
+    // See https://github.com/backdrop/backdrop-issues/issues/2158
+    // @todo Remove this when fixed in core.
+    $cids = $cid;
+    if (!is_array($cids)) {
+      $cids = array($cid);
     }
-    if (is_file($filename . '.created')) {
-      unlink($filename . '.created');
-    }
-    if (is_file($filename . '.expire')) {
-      unlink($filename . '.expire');
-    }
+    $this->deleteMultiple($cids);
   }
 
   /**
@@ -232,7 +247,17 @@ class FilecacheCache implements BackdropCacheInterface {
  */
   function deleteMultiple(array $cids) {
     foreach ($cids as $cid) {
-      $this->delete($cid);
+      $cid = $this->prepareCid($cid);
+      $filename = $this->directory . '/' . $cid . '.php';
+      if (is_file($filename)) {
+        unlink($filename);
+      }
+      if (is_file($filename . '.created')) {
+        unlink($filename . '.created');
+      }
+      if (is_file($filename . '.expire')) {
+        unlink($filename . '.expire');
+      }
     }
   }
 
@@ -243,9 +268,13 @@ class FilecacheCache implements BackdropCacheInterface {
     if (!function_exists('file_scan_directory')) {
       require_once BACKDROP_ROOT . '/core/includes/file.inc';
     }
-    $expire_files = file_scan_directory($this->directory, '/^' . $prefix . '.*/');
+
+    $expire_files = file_scan_directory($this->directory, '/^' . $this->prepareCid($prefix) . '.*/');
+
     foreach ($expire_files as $file) {
-      unlink($file->uri);
+      if (is_file($file->uri)) {
+        unlink($file->uri);
+      }
     }
   }
 
