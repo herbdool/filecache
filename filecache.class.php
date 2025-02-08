@@ -151,8 +151,7 @@ class FilecacheCache implements BackdropCacheInterface {
    *   valid item to load.
    */
   protected function prepareItem($cache) {
-    $item = new stdClass();
-    if (!$item->data = @unserialize(base64_decode($cache))){
+    if (!$item = @unserialize(base64_decode($cache))){
       return FALSE;
     }
     return $item;
@@ -210,14 +209,17 @@ class FilecacheCache implements BackdropCacheInterface {
    */
   function set($cid, $data, $expire = CACHE_PERMANENT) {
     $cid = $this->prepareCid($cid);
+    $cache = new StdClass;
+    $cache->cid = $cid;
+    $cache->created = REQUEST_TIME;
+    $cache->expire = $expire;
+    $cache->data = $data;
     try {
-      $data = '<?php $cached_data=\'' . base64_encode(serialize($data)) . '\';';
+      $cache = '<?php $cached_data=\'' . base64_encode(serialize($cache)) . '\';';
       $filename = $this->directory . '/' . $cid . '.php';
 
-      file_put_contents($filename, $data, LOCK_EX);
+      file_put_contents($filename, $cache, LOCK_EX);
       backdrop_chmod($filename);
-      file_put_contents($filename . '.created', REQUEST_TIME, LOCK_EX);
-      backdrop_chmod($filename . '.created');
       if ($expire !== CACHE_PERMANENT) {
         file_put_contents($filename . '.expire', $expire, LOCK_EX);
         backdrop_chmod($filename . '.expire');
@@ -251,9 +253,6 @@ class FilecacheCache implements BackdropCacheInterface {
       $filename = $this->directory . '/' . $cid . '.php';
       if (is_file($filename)) {
         unlink($filename);
-      }
-      if (is_file($filename . '.created')) {
-        unlink($filename . '.created');
       }
       if (is_file($filename . '.expire')) {
         unlink($filename . '.expire');
