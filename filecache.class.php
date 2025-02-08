@@ -123,13 +123,10 @@ class FilecacheCache implements BackdropCacheInterface {
     $cid = $this->prepareCid($cid);
     if (file_exists($this->directory . '/' . $cid . '.php')) {
       include $this->directory . '/' . $cid . '.php';
-      if (isset($cached_data)) {
-        $item = $this->prepareItem($cached_data);
-        if ($item) {
-          $item->cid = $cid;
-          if (is_file($cid . '.created')) {
-            $item->created = file_get_contents($cid . '.created');
-          }
+      if (isset($cache)) {
+        $item = $this->prepareItem($cache);
+        if (!$item) {
+          return FALSE;
         }
         return $item;
       }
@@ -151,7 +148,7 @@ class FilecacheCache implements BackdropCacheInterface {
    *   valid item to load.
    */
   protected function prepareItem($cache) {
-    if (!$item = @unserialize(base64_decode($cache))){
+    if (!$item = @unserialize(@base64_decode($cache))){
       return FALSE;
     }
     return $item;
@@ -215,7 +212,7 @@ class FilecacheCache implements BackdropCacheInterface {
     $cache->expire = $expire;
     $cache->data = $data;
     try {
-      $cache = '<?php $cached_data=\'' . base64_encode(serialize($cache)) . '\';';
+      $cache = '<?php $cache=\'' . base64_encode(serialize($cache)) . '\';';
       $filename = $this->directory . '/' . $cid . '.php';
 
       file_put_contents($filename, $cache, LOCK_EX);
