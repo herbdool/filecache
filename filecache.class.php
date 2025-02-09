@@ -27,7 +27,6 @@ define('FILECACHE_CID_FILENAME_POS_BEFORE_MD5', FILECACHE_CID_FILENAME_MAX - 34)
  */
 abstract class FilecacheBaseCache implements BackdropCacheInterface {
 
-
   /**
    * @var string|null
    */
@@ -50,7 +49,7 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
   /**
    * Constructs a new BackdropDatabaseCache object.
    */
-  function __construct($bin) {
+  public function __construct($bin) {
     // All cache tables should be prefixed with 'cache_', except for the
     // default 'cache' bin.
     if ($bin != 'cache') {
@@ -123,10 +122,10 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
    * Checks that items are either permanent or did not expire, and unserializes
    * data as appropriate.
    *
-   * @param $cache
+   * @param string $cache
    *   An item loaded from BackdropCacheInterface::get() or BackdropCacheInterface::getMultiple().
    *
-   * @return
+   * @return object
    *   The item with data unserialized as appropriate or FALSE if there is no
    *   valid item to load.
    */
@@ -140,7 +139,7 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
    * @return string
    *   String that is derived from $cid and can be used as file name.
    */
-  function prepareCid(string $cid): string {
+  protected function prepareCid(string $cid): string {
     // Use urlencode(), but turn the
     // encoded ':' and '/' back into ordinary characters since they're used so
     // often. (Especially ':', but '/' is used in cache_menu.)
@@ -160,7 +159,7 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
   /**
    * {@inheritdoc}
    */
-  function getMultiple(array &$cids) {
+  public function getMultiple(array &$cids) {
     try {
       $cache = array();
       foreach ($cids as $cid) {
@@ -181,7 +180,7 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
   /**
    * {@inheritdoc}
    */
-  function delete($cid) {
+  public function delete($cid) {
     // Entity cache passes in an array instead of a single ID.
     // See https://github.com/backdrop/backdrop-issues/issues/2158
     // @todo Remove this when fixed in core.
@@ -195,7 +194,7 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
     /**
    * {@inheritdoc}
    */
-  function deletePrefix($prefix) {
+  public function deletePrefix($prefix) {
     if (!function_exists('file_scan_directory')) {
       require_once BACKDROP_ROOT . '/core/includes/file.inc';
     }
@@ -212,15 +211,15 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
   /**
    * {@inheritdoc}
    */
-  function flush() {
+  public function flush() {
     file_unmanaged_delete_recursive($this->directory);
     file_prepare_directory($this->directory, FILE_CREATE_DIRECTORY);
   }
 
   /**
-   * Implements BackdropCacheInterface::garbageCollection().
+   * {@inheritdoc}
    */
-  function garbageCollection() {
+  public function garbageCollection() {
     if(!is_dir($this->directory)){
       return;
     }
@@ -243,7 +242,7 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
   /**
    * {@inheritdoc}
    */
-  function isEmpty() {
+  public function isEmpty() {
     $this->garbageCollection();
 
     $handle = opendir($this->directory);
@@ -269,7 +268,7 @@ class FilecacheCache extends FilecacheBaseCache {
   /**
    * {@inheritdoc}
    */
-  function get($cid) {
+  public function get($cid) {
     $cid = $this->prepareCid($cid);
     $filename = $this->directory . '/' . $cid;
     if (file_exists($filename)) {
@@ -317,7 +316,7 @@ class FilecacheCache extends FilecacheBaseCache {
   /**
    * {@inheritdoc}
    */
-  function set($cid, $data, $expire = CACHE_PERMANENT) {
+  public function set($cid, $data, $expire = CACHE_PERMANENT) {
     $cid = $this->prepareCid($cid);
     $cache = new StdClass;
     $cache->cid = $cid;
@@ -343,7 +342,7 @@ class FilecacheCache extends FilecacheBaseCache {
   /**
    * {@inheritdoc}
    */
-  function deleteMultiple(array $cids) {
+  public function deleteMultiple(array $cids) {
     foreach ($cids as $cid) {
       $cid = $this->prepareCid($cid);
       $filename = $this->directory . '/' . $cid;
@@ -372,7 +371,7 @@ class FilecachePhpCache extends FilecacheBaseCache {
   /**
    * {@inheritdoc}
    */
-  function get($cid) {
+  public function get($cid) {
     $cid = $this->prepareCid($cid);
     if (file_exists($this->directory . '/' . $cid . '.php')) {
       include $this->directory . '/' . $cid . '.php';
@@ -400,7 +399,7 @@ class FilecachePhpCache extends FilecacheBaseCache {
   /**
    * {@inheritdoc}
    */
-  function set($cid, $data, $expire = CACHE_PERMANENT) {
+  public function set($cid, $data, $expire = CACHE_PERMANENT) {
     $cid = $this->prepareCid($cid);
     $cache = new StdClass;
     $cache->cid = $cid;
@@ -426,7 +425,7 @@ class FilecachePhpCache extends FilecacheBaseCache {
   /**
    * {@inheritdoc}
    */
-  function deleteMultiple(array $cids) {
+  public function deleteMultiple(array $cids) {
     foreach ($cids as $cid) {
       $cid = $this->prepareCid($cid);
       $filename = $this->directory . '/' . $cid . '.php';
