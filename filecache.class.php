@@ -262,9 +262,112 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
 /**
  * Defines a Filecache cache implementation.
  *
- * Use Directory as a bin and file as a cache file.
+ * Store cache as serialized objects in files.
  */
 class FilecacheCache extends FilecacheBaseCache {
+
+  /**
+   * {@inheritdoc}
+   */
+  function get($cid) {
+    $cid = $this->prepareCid($cid);
+    $filename = $this->directory . '/' . $cid;
+    if (file_exists($filename)) {
+      $cache = @file_get_contents($filename);
+      if (isset($cache)) {
+        $item = $this->prepareItem($cache);
+        if ($item === FALSE) {
+          // In the middle of cache_set.
+          $fh = fopen($filename, 'rb');
+          if ($fh === FALSE) {
+            return FALSE;
+          }
+          if (flock($fh, LOCK_SH) === FALSE) {
+            fclose($fh);
+            return FALSE;
+          }
+          $item = $this->prepareItem(@stream_get_contents($fh));
+          if ($item === FALSE ||
+              flock($fh, LOCK_UN) === FALSE ||
+              fclose($fh) === FALSE) {
+            // Remove broken file,
+            unlink($filename);
+            flock($fh, LOCK_UN);
+            fclose($fh);
+            return FALSE;
+          }
+        }
+        return $item;
+      }
+      return FALSE;
+    }
+    return FALSE;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  protected function prepareItem($cache) {
+    if (!$item = @unserialize($cache)){
+      return FALSE;
+    }
+    return $item;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  function set($cid, $data, $expire = CACHE_PERMANENT) {
+    $cid = $this->prepareCid($cid);
+    $cache = new StdClass;
+    $cache->cid = $cid;
+    $cache->created = REQUEST_TIME;
+    $cache->expire = $expire;
+    $cache->data = $data;
+    try {
+      $cache = serialize($cache);
+      $filename = $this->directory . '/' . $cid;
+
+      file_put_contents($filename, $cache, LOCK_EX);
+      backdrop_chmod($filename);
+      if ($expire !== CACHE_PERMANENT) {
+        file_put_contents($filename . '.expire', $expire, LOCK_EX);
+        backdrop_chmod($filename . '.expire');
+      }
+    }
+    catch (Exception $e) {
+      // The Filecache may not be available, so we'll ignore these calls.
+    }
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  function deleteMultiple(array $cids) {
+    foreach ($cids as $cid) {
+      $cid = $this->prepareCid($cid);
+      $filename = $this->directory . '/' . $cid;
+      if (is_file($filename)) {
+        unlink($filename);
+      }
+      if (is_file($filename . '.expire')) {
+        unlink($filename . '.expire');
+      }
+    }
+  }
+}
+
+/**
+ * Defines a Filecache cache as PHP implementation.
+ *
+ * Store and include cache in PHP files. The cache is serialized, encoded with
+ * base64 and assigned to a variable in the file. The advantage is that the
+ * files can be cached in opcode. The disadvantage is that they're more likely
+ * to cause a fatal error if the file is corrupted. Also, a base64 encoding is
+ * required so that gzip compressed page bodies are encoded so as not to
+ * interfere with assigning the cache string to a variable in a PHP file.
+ */
+class FilecachePhpCache extends FilecacheBaseCache {
 
   /**
    * {@inheritdoc}

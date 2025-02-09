@@ -2,20 +2,31 @@
 
 This module provides the ability to store caches in files.
 
-Using opcache is highly recommended. This way all cache files will get
-stored in opcache memory. It will increase filecache speed dramatically.
+The default stores cache as serialized objects as strings in files.
 
-Right now the module provides only a class to replace BackdropDatabaseCache. No
-need to enable the module. Just download it into modules folder and update
-settings.php.
+There is also an experimental approach that stores cache files as PHP code so
+that if opcache is installed, that it has an opportunity of storing the
+cache-as-code in opcache memory. This will likely increase retrieval of the
+cache speed. The risk, however, is that if a cache is corrupted that it could
+result in problems loading the site, whereas the default approach will just
+rebuild the cache item.
 
 ## Installation
 
 1. Download module to modules folder.
-2. Change settings.php by adding next lines:
+2. No need to enable the module. Right now the module only provides only a class
+   to replace BackdropDatabaseCache.
+3. Change `settings.php` by adding the next lines:
 
 ```php
 $settings['cache_default_class'] = 'FilecacheCache';
+$settings['cache_backends'] = array('modules/filecache/filecache.class.php');
+```
+
+or, the experimental approach of storing the cache in PHP files:
+
+```php
+$settings['cache_default_class'] = 'FilecachePhpCache';
 $settings['cache_backends'] = array('modules/filecache/filecache.class.php');
 ```
 
