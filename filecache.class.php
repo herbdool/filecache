@@ -81,8 +81,7 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
         $default_location = realpath($public_path);
       }
 
-      $file_custom_directory = config_get('filecache.settings', 'file_storage_dir');
-      self::$file_storage_directory = $file_custom_directory ? $file_custom_directory : $default_location . '/filecache';
+      self::$file_storage_directory = settings_get('filecache_storage_dir', $default_location . '/filecache');
 
       if (!function_exists('file_prepare_directory')) {
         require_once BACKDROP_ROOT . '/core/includes/file.inc';

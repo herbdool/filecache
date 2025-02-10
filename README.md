@@ -29,6 +29,14 @@ $settings['cache_default_class'] = 'FilecacheCache';
 $settings['cache_backends'] = array('modules/filecache/filecache.class.php');
 ```
 
+Optionally, set the directory for storing the cache bins. If not set it will
+store them in Backdrop's private files directory, or default to the public files
+directory and protect the directory. Custom directory:
+
+```php
+$settings['filecache_storage_dir'] = '/app/filecache';
+```
+
 If you wish to use the experimental approach of storing the cache in PHP files,
 set the cache class to be `FilecachePhpCache` instead, in the lines above.
 
