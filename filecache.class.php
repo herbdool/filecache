@@ -21,13 +21,15 @@ define('FILECACHE_CID_FILENAME_MAX', 200);
 define('FILECACHE_CID_FILENAME_POS_BEFORE_MD5', FILECACHE_CID_FILENAME_MAX - 34);
 
 /**
- * Defines a Filecache cache implementation.
+ * Defines a Filecache base cache class.
  *
- * Use Directory as a bin and file as a cache file.
+ * Use Directory as a bin and file as a cache item.
  */
-class FilecacheCache implements BackdropCacheInterface {
+abstract class FilecacheBaseCache implements BackdropCacheInterface {
 
   /**
+   * Location of all cache files.
+   *
    * @var string|null
    */
   protected static $file_storage_directory;
@@ -35,22 +37,22 @@ class FilecacheCache implements BackdropCacheInterface {
   /**
    * The cache bin where the cache object is stored.
    *
-   * @param string
+   * @var string
    */
   protected $bin;
 
   /**
    * File cache directory
    *
-   * @param string
+   * @var string
    */
   protected $directory;
 
   /**
-   * Constructs a new BackdropDatabaseCache object.
+   * Constructs a new FilecacheBaseCache object.
    */
-  function __construct($bin) {
-    // All cache tables should be prefixed with 'cache_', except for the
+  public function __construct($bin) {
+    // All cache bins should be prefixed with 'cache_', except for the
     // default 'cache' bin.
     if ($bin != 'cache') {
       $bin = 'cache_' . $bin;
@@ -117,64 +119,19 @@ class FilecacheCache implements BackdropCacheInterface {
   }
 
   /**
-   * Implements BackdropCacheInterface::get().
-   */
-  function get($cid) {
-    $cid = $this->prepareCid($cid);
-    if (file_exists($this->directory . '/' . $cid . '.php')) {
-      include $this->directory . '/' . $cid . '.php';
-      if (isset($cache)) {
-        $item = $this->prepareItem($cache);
-        if (!$item) {
-          return FALSE;
-        }
-        return $item;
-      }
-    }
-    return FALSE;
-  }
-
-  /**
    * Prepares a cached item.
    *
    * Checks that items are either permanent or did not expire, and unserializes
    * data as appropriate.
    *
-   * @param $cache
-   *   An item loaded from BackdropCacheInterface::get() or BackdropCacheInterface::getMultiple().
+   * @param string $cache
+   *   An item loaded from BackdropCacheInterface::get().
    *
-   * @return
+   * @return object
    *   The item with data unserialized as appropriate or FALSE if there is no
    *   valid item to load.
    */
-  protected function prepareItem($cache) {
-    if (!$item = @unserialize(@base64_decode($cache))){
-      return FALSE;
-    }
-    return $item;
-  }
-
-  /**
-   * Implements BackdropCacheInterface::getMultiple().
-   */
-  function getMultiple(array &$cids) {
-    try {
-      $cache = array();
-      foreach ($cids as $cid) {
-        if ($item = $this->get($cid)){
-          $cache[$cid] = $item;
-        }
-      }
-      $cids = array_diff($cids, array_keys($cache));
-      return $cache;
-    }
-    catch (Exception $e) {
-      // If the Filecache is not available, cache requests should
-      // return FALSE in order to allow exception handling to occur.
-      return array();
-    }
-
-  }
+  abstract protected function prepareItem($cache);
 
   /**
    * Normalizes a cache ID so it is usable for file name.
@@ -184,7 +141,7 @@ class FilecacheCache implements BackdropCacheInterface {
    * @return string
    *   String that is derived from $cid and can be used as file name.
    */
-  function prepareCid(string $cid): string {
+  protected function prepareCid(string $cid): string {
     // Use urlencode(), but turn the
     // encoded ':' and '/' back into ordinary characters since they're used so
     // often. (Especially ':', but '/' is used in cache_menu.)
@@ -202,9 +159,251 @@ class FilecacheCache implements BackdropCacheInterface {
   }
 
   /**
-   * Implements BackdropCacheInterface::set().
+   * {@inheritdoc}
    */
-  function set($cid, $data, $expire = CACHE_PERMANENT) {
+  public function getMultiple(array &$cids) {
+    try {
+      $cache = array();
+      foreach ($cids as $cid) {
+        if ($item = $this->get($cid)){
+          $cache[$cid] = $item;
+        }
+      }
+      $cids = array_diff($cids, array_keys($cache));
+      return $cache;
+    }
+    catch (Exception $e) {
+      // If the Filecache is not available, cache requests should
+      // return an empty array in order to allow exception handling to occur.
+      return array();
+    }
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function delete($cid) {
+    // Entity cache passes in an array instead of a single ID.
+    // See https://github.com/backdrop/backdrop-issues/issues/2158
+    // @todo Remove this when fixed in core.
+    $cids = $cid;
+    if (!is_array($cids)) {
+      $cids = array($cid);
+    }
+    $this->deleteMultiple($cids);
+  }
+
+    /**
+   * {@inheritdoc}
+   */
+  public function deletePrefix($prefix) {
+    if (!function_exists('file_scan_directory')) {
+      require_once BACKDROP_ROOT . '/core/includes/file.inc';
+    }
+
+    $expire_files = file_scan_directory($this->directory, '/^' . $this->prepareCid($prefix) . '.*/');
+
+    foreach ($expire_files as $file) {
+      if (is_file($file->uri)) {
+        unlink($file->uri);
+      }
+    }
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function flush() {
+    file_unmanaged_delete_recursive($this->directory);
+    file_prepare_directory($this->directory, FILE_CREATE_DIRECTORY);
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function garbageCollection() {
+    if(!is_dir($this->directory)){
+      return;
+    }
+
+    // Get current list of items.
+    if (!function_exists('file_scan_directory')) {
+      require_once BACKDROP_ROOT . '/core/includes/file.inc';
+    }
+    $expire_files = file_scan_directory($this->directory, '/*.expire$/');
+    foreach ($expire_files as $file) {
+      $timestamp = file_get_contents($file->uri);
+      if ($timestamp < REQUEST_TIME) {
+        unlink($file->uri);
+        unlink(substr($file->uri, 0, -7));
+      }
+    }
+
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function isEmpty() {
+    $this->garbageCollection();
+
+    $handle = opendir($this->directory);
+    $empty = TRUE;
+    while (FALSE !== ($entry = readdir($handle))) {
+      if ($entry != "." && $entry != "..") {
+        $empty = FALSE;
+        break;
+      }
+    }
+    closedir($handle);
+    return $empty;
+  }
+}
+
+/**
+ * Defines a Filecache cache implementation.
+ *
+ * Store cache as serialized objects in files.
+ */
+class FilecacheCache extends FilecacheBaseCache {
+
+  /**
+   * {@inheritdoc}
+   */
+  public function get($cid) {
+    $cid = $this->prepareCid($cid);
+    $filename = $this->directory . '/' . $cid;
+    if (file_exists($filename)) {
+      $cache = @file_get_contents($filename);
+      if (isset($cache)) {
+        $item = $this->prepareItem($cache);
+        if ($item === FALSE) {
+          // In the middle of cache_set.
+          $fh = fopen($filename, 'rb');
+          if ($fh === FALSE) {
+            return FALSE;
+          }
+          if (flock($fh, LOCK_SH) === FALSE) {
+            fclose($fh);
+            return FALSE;
+          }
+          $item = $this->prepareItem(@stream_get_contents($fh));
+          if ($item === FALSE ||
+              flock($fh, LOCK_UN) === FALSE ||
+              fclose($fh) === FALSE) {
+            // Remove broken file,
+            unlink($filename);
+            flock($fh, LOCK_UN);
+            fclose($fh);
+            return FALSE;
+          }
+        }
+        return $item;
+      }
+      return FALSE;
+    }
+    return FALSE;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  protected function prepareItem($cache) {
+    if (!$item = @unserialize($cache)){
+      return FALSE;
+    }
+    return $item;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function set($cid, $data, $expire = CACHE_PERMANENT) {
+    $cid = $this->prepareCid($cid);
+    $cache = new StdClass;
+    $cache->cid = $cid;
+    $cache->created = REQUEST_TIME;
+    $cache->expire = $expire;
+    $cache->data = $data;
+    try {
+      $cache = serialize($cache);
+      $filename = $this->directory . '/' . $cid;
+
+      file_put_contents($filename, $cache, LOCK_EX);
+      backdrop_chmod($filename);
+      if ($expire !== CACHE_PERMANENT) {
+        file_put_contents($filename . '.expire', $expire, LOCK_EX);
+        backdrop_chmod($filename . '.expire');
+      }
+    }
+    catch (Exception $e) {
+      // The Filecache may not be available, so we'll ignore these calls.
+    }
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function deleteMultiple(array $cids) {
+    foreach ($cids as $cid) {
+      $cid = $this->prepareCid($cid);
+      $filename = $this->directory . '/' . $cid;
+      if (is_file($filename)) {
+        unlink($filename);
+      }
+      if (is_file($filename . '.expire')) {
+        unlink($filename . '.expire');
+      }
+    }
+  }
+}
+
+/**
+ * Defines a Filecache cache as PHP implementation.
+ *
+ * Store and include cache items as PHP files. The cache is serialized, encoded
+ * with base64 and assigned to a variable in the file. This allows the files to
+ * be cached in opcode. However, they're more likely to cause a fatal error if
+ * the file is corrupted so this is considered experimental.
+ *
+ * The serialized object also needs to have base64 encoding. The cache_page bin
+ * can include gzip compressed page bodies that could include characters such as
+ * single quotes which cannot be escaped for storing in a variable.
+ */
+class FilecachePhpCache extends FilecacheBaseCache {
+
+  /**
+   * {@inheritdoc}
+   */
+  public function get($cid) {
+    $cid = $this->prepareCid($cid);
+    if (file_exists($this->directory . '/' . $cid . '.php')) {
+      include $this->directory . '/' . $cid . '.php';
+      if (isset($cache)) {
+        $item = $this->prepareItem($cache);
+        if (!$item) {
+          return FALSE;
+        }
+        return $item;
+      }
+    }
+    return FALSE;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  protected function prepareItem($cache) {
+    if (!$item = @unserialize(@base64_decode($cache))){
+      return FALSE;
+    }
+    return $item;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function set($cid, $data, $expire = CACHE_PERMANENT) {
     $cid = $this->prepareCid($cid);
     $cache = new StdClass;
     $cache->cid = $cid;
@@ -228,23 +427,9 @@ class FilecacheCache implements BackdropCacheInterface {
   }
 
   /**
-   * Implements BackdropCacheInterface::delete().
+   * {@inheritdoc}
    */
-  function delete($cid) {
-    // Entity cache passes in an array instead of a single ID.
-    // See https://github.com/backdrop/backdrop-issues/issues/2158
-    // @todo Remove this when fixed in core.
-    $cids = $cid;
-    if (!is_array($cids)) {
-      $cids = array($cid);
-    }
-    $this->deleteMultiple($cids);
-  }
-
-  /**
- * Implements BackdropCacheInterface::deleteMultiple().
- */
-  function deleteMultiple(array $cids) {
+  public function deleteMultiple(array $cids) {
     foreach ($cids as $cid) {
       $cid = $this->prepareCid($cid);
       $filename = $this->directory . '/' . $cid . '.php';
@@ -255,71 +440,5 @@ class FilecacheCache implements BackdropCacheInterface {
         unlink($filename . '.expire');
       }
     }
-  }
-
-  /**
-   * Implements BackdropCacheInterface::deletePrefix().
-   */
-  function deletePrefix($prefix) {
-    if (!function_exists('file_scan_directory')) {
-      require_once BACKDROP_ROOT . '/core/includes/file.inc';
-    }
-
-    $expire_files = file_scan_directory($this->directory, '/^' . $this->prepareCid($prefix) . '.*/');
-
-    foreach ($expire_files as $file) {
-      if (is_file($file->uri)) {
-        unlink($file->uri);
-      }
-    }
-  }
-
-  /**
-   * Implements BackdropCacheInterface::flush().
-   */
-  function flush() {
-    file_unmanaged_delete_recursive($this->directory);
-    file_prepare_directory($this->directory, FILE_CREATE_DIRECTORY);
-  }
-
-  /**
-   * Implements BackdropCacheInterface::garbageCollection().
-   */
-  function garbageCollection() {
-    if(!is_dir($this->directory)){
-      return;
-    }
-
-    // Get current list of items.
-    if (!function_exists('file_scan_directory')) {
-      require_once BACKDROP_ROOT . '/core/includes/file.inc';
-    }
-    $expire_files = file_scan_directory($this->directory, '/*.expire$/');
-    foreach ($expire_files as $file) {
-      $timestamp = file_get_contents($file->uri);
-      if ($timestamp < REQUEST_TIME) {
-        unlink($file->uri);
-        unlink(substr($file->uri, 0, -7));
-      }
-    }
-
-  }
-
-  /**
-   * Implements BackdropCacheInterface::isEmpty().
-   */
-  function isEmpty() {
-    $this->garbageCollection();
-
-    $handle = opendir($this->directory);
-    $empty = TRUE;
-    while (false !== ($entry = readdir($handle))) {
-      if ($entry != "." && $entry != "..") {
-        $empty = FALSE;
-        break;
-      }
-    }
-    closedir($handle);
-    return $empty;
   }
 }
