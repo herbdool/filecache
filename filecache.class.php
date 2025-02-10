@@ -23,11 +23,13 @@ define('FILECACHE_CID_FILENAME_POS_BEFORE_MD5', FILECACHE_CID_FILENAME_MAX - 34)
 /**
  * Defines a Filecache base cache class.
  *
- * Use Directory as a bin and file as a cache file.
+ * Use Directory as a bin and file as a cache item.
  */
 abstract class FilecacheBaseCache implements BackdropCacheInterface {
 
   /**
+   * Location of all cache files.
+   *
    * @var string|null
    */
   protected static $file_storage_directory;
@@ -35,22 +37,22 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
   /**
    * The cache bin where the cache object is stored.
    *
-   * @param string
+   * @var string
    */
   protected $bin;
 
   /**
    * File cache directory
    *
-   * @param string
+   * @var string
    */
   protected $directory;
 
   /**
-   * Constructs a new BackdropDatabaseCache object.
+   * Constructs a new FilecacheBaseCache object.
    */
   public function __construct($bin) {
-    // All cache tables should be prefixed with 'cache_', except for the
+    // All cache bins should be prefixed with 'cache_', except for the
     // default 'cache' bin.
     if ($bin != 'cache') {
       $bin = 'cache_' . $bin;
@@ -123,7 +125,7 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
    * data as appropriate.
    *
    * @param string $cache
-   *   An item loaded from BackdropCacheInterface::get() or BackdropCacheInterface::getMultiple().
+   *   An item loaded from BackdropCacheInterface::get().
    *
    * @return object
    *   The item with data unserialized as appropriate or FALSE if there is no
@@ -172,7 +174,7 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
     }
     catch (Exception $e) {
       // If the Filecache is not available, cache requests should
-      // return FALSE in order to allow exception handling to occur.
+      // return an empty array in order to allow exception handling to occur.
       return array();
     }
   }
@@ -359,12 +361,14 @@ class FilecacheCache extends FilecacheBaseCache {
 /**
  * Defines a Filecache cache as PHP implementation.
  *
- * Store and include cache in PHP files. The cache is serialized, encoded with
- * base64 and assigned to a variable in the file. The advantage is that the
- * files can be cached in opcode. The disadvantage is that they're more likely
- * to cause a fatal error if the file is corrupted. Also, a base64 encoding is
- * required so that gzip compressed page bodies are encoded so as not to
- * interfere with assigning the cache string to a variable in a PHP file.
+ * Store and include cache items as PHP files. The cache is serialized, encoded
+ * with base64 and assigned to a variable in the file. This allows the files to
+ * be cached in opcode. However, they're more likely to cause a fatal error if
+ * the file is corrupted so this is considered experimental.
+ *
+ * The serialized object also needs to have base64 encoding. The cache_page bin
+ * can include gzip compressed page bodies that could include characters such as
+ * single quotes which cannot be escaped for storing in a variable.
  */
 class FilecachePhpCache extends FilecacheBaseCache {
 
