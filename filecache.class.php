@@ -192,7 +192,7 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
     $this->deleteMultiple($cids);
   }
 
-    /**
+  /**
    * {@inheritdoc}
    */
   public function deletePrefix($prefix) {
@@ -204,7 +204,8 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
 
     foreach ($expire_files as $file) {
       if (is_file($file->uri)) {
-        unlink($file->uri);
+        @unlink($file->uri);
+        clearstatcache(FALSE, $file->uri);
       }
     }
   }
@@ -213,7 +214,21 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
    * {@inheritdoc}
    */
   public function flush() {
-    file_unmanaged_delete_recursive($this->directory);
+    if (!function_exists('file_scan_directory')) {
+      require_once BACKDROP_ROOT . '/core/includes/file.inc';
+    }
+
+    $expire_files = file_scan_directory($this->directory, '/^.*/');
+
+    foreach ($expire_files as $file) {
+      if (is_file($file->uri)) {
+        if (@unlink($file->uri)) {
+          clearstatcache(FALSE, $file->uri);
+        }
+      }
+    }
+    @rmdir($this->directory);
+
     file_prepare_directory($this->directory, FILE_CREATE_DIRECTORY);
   }
 
@@ -233,8 +248,13 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
     foreach ($expire_files as $file) {
       $timestamp = file_get_contents($file->uri);
       if ($timestamp < REQUEST_TIME) {
-        unlink($file->uri);
-        unlink(substr($file->uri, 0, -7));
+        if (@unlink($file->uri)) {
+          clearstatcache(FALSE, $file->uri);
+        }
+        $cache_path = substr($file->uri, 0, -7);
+        if (@unlink($cache_path)) {
+          clearstatcache(FALSE, $cache_path);
+        }
       }
     }
 
@@ -348,10 +368,12 @@ class FilecacheCache extends FilecacheBaseCache {
       $cid = $this->prepareCid($cid);
       $filename = $this->directory . '/' . $cid;
       if (is_file($filename)) {
-        unlink($filename);
+        @unlink($filename);
+        clearstatcache(FALSE, $filename);
       }
       if (is_file($filename . '.expire')) {
-        unlink($filename . '.expire');
+        @unlink($filename . '.expire');
+        clearstatcache(FALSE, $filename . '.expire');
       }
     }
   }
@@ -433,10 +455,12 @@ class FilecachePhpCache extends FilecacheBaseCache {
       $cid = $this->prepareCid($cid);
       $filename = $this->directory . '/' . $cid . '.php';
       if (is_file($filename)) {
-        unlink($filename);
+        @unlink($filename);
+        clearstatcache(FALSE, $filename);
       }
       if (is_file($filename . '.expire')) {
-        unlink($filename . '.expire');
+        @unlink($filename . '.expire');
+        clearstatcache(FALSE, $filename . '.expire');
       }
     }
   }
