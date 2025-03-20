@@ -247,15 +247,22 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
     $directory_items = scandir($this->directory);
     foreach ($directory_items as $directory_item) {
       if (strpos($directory_item, $safe_prefix) !== FALSE) {
-        $files = file_scan_directory($this->directory . '/' . $directory_item, '/^' . preg_quote($safe_prefix, '/') . '.*/');
+        $path = $this->directory . '/' . $directory_item;
+        if (is_dir($path)) {
+          $files = file_scan_directory($path, '/^' . preg_quote($safe_prefix, '/') . '.*/');
 
-        foreach ($files as $file) {
-          if (is_file($file->uri)) {
-            @unlink($file->uri);
-            clearstatcache(FALSE, $file->uri);
+          foreach ($files as $file) {
+            if (is_file($file->uri)) {
+              @unlink($file->uri);
+              clearstatcache(FALSE, $file->uri);
+            }
           }
+          @rmdir($path);
         }
-        @rmdir($this->directory . '/' . $directory_item);
+        elseif (file_exists($path)) {
+          @unlink($path);
+          clearstatcache(FALSE, $path);
+        }
       }
     }
   }
