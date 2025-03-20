@@ -59,7 +59,7 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
     }
     $this->bin = $bin;
 
-    $this->prepare_directory($bin);
+    $this->prepareDirectory($bin);
   }
 
   /**
@@ -68,7 +68,7 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
    * @return string
    *   The main file storage directory.
    */
-  protected static function file_storage_directory() {
+  protected static function fileStorageDirectory() {
     if (empty(self::$file_storage_directory)) {
       // If private path exists, store it there, fallback to public files.
       $private_path = config_get('system.core', 'file_private_path');
@@ -103,8 +103,8 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
   /**
    * Prepare the directory
    */
-  protected function prepare_directory() {
-    $dir = self::file_storage_directory();
+  protected function prepareDirectory() {
+    $dir = self::fileStorageDirectory();
     $this->directory = $dir . '/' . $this->bin;
 
 
@@ -200,9 +200,9 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
       require_once BACKDROP_ROOT . '/core/includes/file.inc';
     }
 
-    $expire_files = file_scan_directory($this->directory, '/^' . preg_quote($this->prepareCid($prefix), '/') . '.*/');
+    $files = file_scan_directory($this->directory, '/^' . preg_quote($this->prepareCid($prefix), '/') . '.*/');
 
-    foreach ($expire_files as $file) {
+    foreach ($files as $file) {
       if (is_file($file->uri)) {
         @unlink($file->uri);
         clearstatcache(FALSE, $file->uri);
@@ -218,15 +218,6 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
       require_once BACKDROP_ROOT . '/core/includes/file.inc';
     }
 
-    $expire_files = file_scan_directory($this->directory, '/^.*/');
-
-    foreach ($expire_files as $file) {
-      if (is_file($file->uri)) {
-        if (@unlink($file->uri)) {
-          clearstatcache(FALSE, $file->uri);
-        }
-      }
-    }
     @rmdir($this->directory);
 
     file_prepare_directory($this->directory, FILE_CREATE_DIRECTORY);
@@ -236,7 +227,7 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
    * {@inheritdoc}
    */
   public function garbageCollection() {
-    if(!is_dir($this->directory)){
+    if (!is_dir($this->directory)){
       return;
     }
 
