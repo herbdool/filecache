@@ -291,37 +291,41 @@ class FilecacheCache extends FilecacheBaseCache {
    */
   public function get($cid) {
     $cid = $this->prepareCid($cid);
-    $filename = $this->directory . '/' . $cid;
-    if (file_exists($filename)) {
-      $cache = @file_get_contents($filename);
-      if (isset($cache)) {
-        $item = $this->prepareItem($cache);
-        if ($item === FALSE) {
-          // In the middle of cache_set.
-          $fh = fopen($filename, 'rb');
-          if ($fh === FALSE) {
-            return FALSE;
-          }
-          if (flock($fh, LOCK_SH) === FALSE) {
-            fclose($fh);
-            return FALSE;
-          }
-          $item = $this->prepareItem(@stream_get_contents($fh));
-          if ($item === FALSE ||
-              flock($fh, LOCK_UN) === FALSE ||
-              fclose($fh) === FALSE) {
-            // Remove broken file,
-            unlink($filename);
-            flock($fh, LOCK_UN);
-            fclose($fh);
-            return FALSE;
-          }
-        }
-        return $item;
+    $filepath = $this->directory . '/' . $cid;
+    if (file_exists($filepath)) {
+      $cache = $this->getContents($filepath);
+      if (!empty($cache)) {
+        return $this->prepareItem($cache);
       }
       return FALSE;
     }
     return FALSE;
+  }
+
+  /**
+   * Get file contents
+   *
+   * @param string $path
+   *
+   * @return string
+   */
+  protected function getContents($path): string {
+    $contents = '';
+
+    $handle = fopen($path, 'rb');
+    if ($handle) {
+      try {
+        if (flock($handle, LOCK_SH)) {
+          clearstatcache(TRUE, $path);
+          $contents = fread($handle, filesize($path) ?: 1);
+          flock($handle, LOCK_UN);
+        }
+      } finally {
+        fclose($handle);
+      }
+    }
+
+    return $contents;
   }
 
   /**
@@ -346,13 +350,13 @@ class FilecacheCache extends FilecacheBaseCache {
     $cache->data = $data;
     try {
       $cache = serialize($cache);
-      $filename = $this->directory . '/' . $cid;
+      $filepath = $this->directory . '/' . $cid;
 
-      file_put_contents($filename, $cache, LOCK_EX);
-      backdrop_chmod($filename);
+      file_put_contents($filepath, $cache, LOCK_EX);
+      backdrop_chmod($filepath);
       if ($expire !== CACHE_PERMANENT) {
-        file_put_contents($filename . '.expire', $expire, LOCK_EX);
-        backdrop_chmod($filename . '.expire');
+        file_put_contents($filepath . '.expire', $expire, LOCK_EX);
+        backdrop_chmod($filepath . '.expire');
       }
     }
     catch (Exception $e) {
@@ -366,14 +370,14 @@ class FilecacheCache extends FilecacheBaseCache {
   public function deleteMultiple(array $cids) {
     foreach ($cids as $cid) {
       $cid = $this->prepareCid($cid);
-      $filename = $this->directory . '/' . $cid;
-      if (is_file($filename)) {
-        @unlink($filename);
-        clearstatcache(FALSE, $filename);
+      $filepath = $this->directory . '/' . $cid;
+      if (is_file($filepath)) {
+        @unlink($filepath);
+        clearstatcache(FALSE, $filepath);
       }
-      if (is_file($filename . '.expire')) {
-        @unlink($filename . '.expire');
-        clearstatcache(FALSE, $filename . '.expire');
+      if (is_file($filepath . '.expire')) {
+        @unlink($filepath . '.expire');
+        clearstatcache(FALSE, $filepath . '.expire');
       }
     }
   }
@@ -433,13 +437,13 @@ class FilecachePhpCache extends FilecacheBaseCache {
     $cache->data = $data;
     try {
       $cache = '<?php $cache=\'' . base64_encode(serialize($cache)) . '\';';
-      $filename = $this->directory . '/' . $cid . '.php';
+      $filepath = $this->directory . '/' . $cid . '.php';
 
-      file_put_contents($filename, $cache, LOCK_EX);
-      backdrop_chmod($filename);
+      file_put_contents($filepath, $cache, LOCK_EX);
+      backdrop_chmod($filepath);
       if ($expire !== CACHE_PERMANENT) {
-        file_put_contents($filename . '.expire', $expire, LOCK_EX);
-        backdrop_chmod($filename . '.expire');
+        file_put_contents($filepath . '.expire', $expire, LOCK_EX);
+        backdrop_chmod($filepath . '.expire');
       }
     }
     catch (Exception $e) {
@@ -453,14 +457,14 @@ class FilecachePhpCache extends FilecacheBaseCache {
   public function deleteMultiple(array $cids) {
     foreach ($cids as $cid) {
       $cid = $this->prepareCid($cid);
-      $filename = $this->directory . '/' . $cid . '.php';
-      if (is_file($filename)) {
-        @unlink($filename);
-        clearstatcache(FALSE, $filename);
+      $filepath = $this->directory . '/' . $cid . '.php';
+      if (is_file($filepath)) {
+        @unlink($filepath);
+        clearstatcache(FALSE, $filepath);
       }
-      if (is_file($filename . '.expire')) {
-        @unlink($filename . '.expire');
-        clearstatcache(FALSE, $filename . '.expire');
+      if (is_file($filepath . '.expire')) {
+        @unlink($filepath . '.expire');
+        clearstatcache(FALSE, $filepath . '.expire');
       }
     }
   }
