@@ -141,12 +141,7 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
    *   String that is derived from $cid and can be used as file name.
    */
   protected function prepareCid(string $cid): string {
-    // Use urlencode(), but turn the
-    // encoded ':' and '/' back into ordinary characters since they're used so
-    // often. (Especially ':', but '/' is used in cache_menu.)
-    // We can't turn them back into their own characters though; both are
-    // considered unsafe in filenames. So turn ':' -> '@' and '/' -> '='
-    $safe_cid = str_replace(array('%3A', '%2F'), array('@', '='), urlencode($cid));
+    $safe_cid = $this->safeCid($cid);
     if (strlen($safe_cid) > FILECACHE_CID_FILENAME_MAX) {
       $safe_cid =
         substr($safe_cid, 0, FILECACHE_CID_FILENAME_POS_BEFORE_MD5) .
@@ -155,6 +150,54 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
     }
 
     return $safe_cid;
+  }
+
+  /**
+   * Create a sub directory
+   *   Uses the first three colons as a sub directory. This will cover most
+   *   calls to clear by prefix as well.
+   *
+   * @param string $cid
+   *   Cache ID. Needs to be the safe cid where colon is encoded.
+   * @return string
+   *   The path to the sub directory.
+   */
+  protected function prepareSubDirectory(string $cid): string {
+    $sub_directory = '';
+
+    $sections = explode('@', $cid, 4);
+    if (count($sections) > 1) {
+      array_splice($sections, 3);
+      $sub_directory = '/' . implode('@', $sections) . '@';
+    }
+
+    $directory = $this->directory . $sub_directory;
+
+    if (!function_exists('file_prepare_directory')) {
+      require_once BACKDROP_ROOT . '/core/includes/file.inc';
+    }
+
+    if (!is_dir($directory) && !file_exists($directory)) {
+      file_prepare_directory($directory, FILE_CREATE_DIRECTORY);
+    }
+
+    return $directory;
+  }
+
+  /**
+   * Safe cache ID
+   *
+   * @param string $cid
+   *   Cache ID.
+   * @return string
+   */
+  protected function safeCid(string $cid): string {
+    // Use urlencode(), but turn the
+    // encoded ':' and '/' back into ordinary characters since they're used so
+    // often. (Especially ':', but '/' is used in cache_menu.)
+    // We can't turn them back into their own characters though; both are
+    // considered unsafe in filenames. So turn ':' -> '@' and '/' -> '='
+    return str_replace(array('%3A', '%2F'), array('@', '='), urlencode($cid));
   }
 
   /**
@@ -200,12 +243,19 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
       require_once BACKDROP_ROOT . '/core/includes/file.inc';
     }
 
-    $files = file_scan_directory($this->directory, '/^' . preg_quote($this->prepareCid($prefix), '/') . '.*/');
+    $safe_prefix = $this->prepareCid($prefix);
+    $directory_items = scandir($this->directory);
+    foreach ($directory_items as $directory_item) {
+      if (strpos($directory_item, $safe_prefix) !== FALSE) {
+        $files = file_scan_directory($this->directory . '/' . $directory_item, '/^' . preg_quote($safe_prefix, '/') . '.*/');
 
-    foreach ($files as $file) {
-      if (is_file($file->uri)) {
-        @unlink($file->uri);
-        clearstatcache(FALSE, $file->uri);
+        foreach ($files as $file) {
+          if (is_file($file->uri)) {
+            @unlink($file->uri);
+            clearstatcache(FALSE, $file->uri);
+          }
+        }
+        @rmdir($this->directory . '/' . $directory_item);
       }
     }
   }
@@ -218,16 +268,7 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
       require_once BACKDROP_ROOT . '/core/includes/file.inc';
     }
 
-    $files = file_scan_directory($this->directory, '/^.*/');
-
-    foreach ($files as $file) {
-      if (is_file($file->uri)) {
-        if (@unlink($file->uri)) {
-          clearstatcache(FALSE, $file->uri);
-        }
-      }
-    }
-    @rmdir($this->directory);
+    @file_unmanaged_delete_recursive($this->directory);
 
     file_prepare_directory($this->directory, FILE_CREATE_DIRECTORY);
   }
@@ -291,7 +332,7 @@ class FilecacheCache extends FilecacheBaseCache {
    */
   public function get($cid) {
     $cid = $this->prepareCid($cid);
-    $filepath = $this->directory . '/' . $cid;
+    $filepath = $this->prepareSubDirectory($cid) . '/' . $cid;
     if (file_exists($filepath)) {
       $cache = $this->getContents($filepath);
       if (!empty($cache)) {
@@ -350,7 +391,7 @@ class FilecacheCache extends FilecacheBaseCache {
     $cache->data = $data;
     try {
       $cache = serialize($cache);
-      $filepath = $this->directory . '/' . $cid;
+      $filepath = $this->prepareSubDirectory($cid) . '/' . $cid;
 
       file_put_contents($filepath, $cache, LOCK_EX);
       backdrop_chmod($filepath);
@@ -370,7 +411,7 @@ class FilecacheCache extends FilecacheBaseCache {
   public function deleteMultiple(array $cids) {
     foreach ($cids as $cid) {
       $cid = $this->prepareCid($cid);
-      $filepath = $this->directory . '/' . $cid;
+      $filepath = $this->prepareSubDirectory($cid) . '/' . $cid;
       if (is_file($filepath)) {
         @unlink($filepath);
         clearstatcache(FALSE, $filepath);
@@ -402,8 +443,8 @@ class FilecachePhpCache extends FilecacheBaseCache {
    */
   public function get($cid) {
     $cid = $this->prepareCid($cid);
-    if (file_exists($this->directory . '/' . $cid . '.php')) {
-      include $this->directory . '/' . $cid . '.php';
+    if (file_exists($this->prepareSubDirectory($cid) . '/' . $cid . '.php')) {
+      include $this->prepareSubDirectory($cid) . '/' . $cid . '.php';
       if (isset($cache)) {
         $item = $this->prepareItem($cache);
         if (!$item) {
@@ -437,7 +478,7 @@ class FilecachePhpCache extends FilecacheBaseCache {
     $cache->data = $data;
     try {
       $cache = '<?php $cache=\'' . base64_encode(serialize($cache)) . '\';';
-      $filepath = $this->directory . '/' . $cid . '.php';
+      $filepath = $this->prepareSubDirectory($cid) . '/' . $cid . '.php';
 
       file_put_contents($filepath, $cache, LOCK_EX);
       backdrop_chmod($filepath);
@@ -457,7 +498,7 @@ class FilecachePhpCache extends FilecacheBaseCache {
   public function deleteMultiple(array $cids) {
     foreach ($cids as $cid) {
       $cid = $this->prepareCid($cid);
-      $filepath = $this->directory . '/' . $cid . '.php';
+      $filepath = $this->prepareSubDirectory($cid) . '/' . $cid . '.php';
       if (is_file($filepath)) {
         @unlink($filepath);
         clearstatcache(FALSE, $filepath);
