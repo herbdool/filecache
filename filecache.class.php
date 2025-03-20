@@ -154,8 +154,8 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
 
   /**
    * Create a sub directory
-   *   Uses the first three colons as a sub directory. This will cover most
-   *   calls to clear by prefix as well.
+   *   Uses the first three colons as a sub directory. This will help split up
+   *   some bins into smaller sub directories.
    *
    * @param string $cid
    *   Cache ID. Needs to be the safe cid where colon is encoded.
