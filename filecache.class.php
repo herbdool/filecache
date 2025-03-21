@@ -154,8 +154,8 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
 
   /**
    * Create a sub directory
-   *   Uses up to three colons, or up to 2 slashes, as a sub directory. This
-   *   will help split up some bins into smaller sub directories.
+   *   Uses up to three colons or slashes, as a sub directory. This will help
+   *   split up some bins into smaller sub directories.
    *
    * @param string $cid
    *   Cache ID. Needs to be the safe cid where colon is encoded.
@@ -165,7 +165,7 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
   protected function prepareSubDirectory(string $cid): string {
     $sub_directory = '';
 
-    // Where cid is separated by colons or slash (safe version is "@" or "=").
+    // Where cid is separated by colons or slashes (safe version is "@" or "=").
     preg_match('/^(([^@=]+[@=]){1,3})/', $cid, $matches);
     if ($matches) {
       $sub_directory = $matches[0];
