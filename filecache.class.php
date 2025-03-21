@@ -165,10 +165,20 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
   protected function prepareSubDirectory(string $cid): string {
     $sub_directory = '';
 
-    // Where cid is separated by colons or slashes (safe version is "@" or "=").
-    preg_match('/^(([^@=]+[@=]){1,3})/', $cid, $matches);
+    // Account for domain so that cache_page will have better subdirectories.
+    global $base_url;
+    $escaped_url = preg_quote($this->prepareCid($base_url . '/'));
+    preg_match('/^((' . $escaped_url . ')([^@=]*))/', $cid, $matches);
     if ($matches) {
       $sub_directory = $matches[0];
+    }
+    else {
+      // Where cid is separated by colons (the first couple are typically
+      // "prefixes".
+      preg_match('/^(([^@]+[@]){1,3})/', $cid, $matches);
+      if ($matches) {
+        $sub_directory = $matches[0];
+      }
     }
 
     $directory = $this->directory . '/' . $sub_directory;
