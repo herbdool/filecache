@@ -163,25 +163,9 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
    *   The path to the sub directory.
    */
   protected function prepareSubDirectory(string $cid): string {
-    $sub_directory = '';
+    $hash = md5($cid);
 
-    // Account for domain so that cache_page will have better subdirectories.
-    global $base_url;
-    $escaped_url = preg_quote($this->prepareCid($base_url . '/'));
-    preg_match('/^((' . $escaped_url . ')([^@=]*))/', $cid, $matches);
-    if ($matches) {
-      $sub_directory = $matches[0];
-    }
-    else {
-      // Where cid is separated by colons (the first couple are typically
-      // "prefixes".
-      preg_match('/^(([^@]+[@]){1,3})/', $cid, $matches);
-      if ($matches) {
-        $sub_directory = $matches[0];
-      }
-    }
-
-    $directory = $this->directory . '/' . $sub_directory;
+    $directory = $this->directory . '/' . $hash[0] . $hash[1];
 
     if (!function_exists('file_prepare_directory')) {
       require_once BACKDROP_ROOT . '/core/includes/file.inc';
@@ -268,7 +252,7 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
    * {@inheritdoc}
    */
   public function flush() {
-    if (!function_exists('file_scan_directory')) {
+    if (!function_exists('file_prepare_directory')) {
       require_once BACKDROP_ROOT . '/core/includes/file.inc';
     }
 
