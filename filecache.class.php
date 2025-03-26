@@ -273,7 +273,7 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
     if (!function_exists('file_scan_directory')) {
       require_once BACKDROP_ROOT . '/core/includes/file.inc';
     }
-    $expire_files = file_scan_directory($this->directory, '/*.expire$/');
+    $expire_files = file_scan_directory($this->directory, '/^.*\.expire$/');
     foreach ($expire_files as $file) {
       $timestamp = file_get_contents($file->uri);
       if ($timestamp < REQUEST_TIME) {
