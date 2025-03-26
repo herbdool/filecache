@@ -141,12 +141,7 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
    *   String that is derived from $cid and can be used as file name.
    */
   protected function prepareCid(string $cid): string {
-    // Use urlencode(), but turn the
-    // encoded ':' and '/' back into ordinary characters since they're used so
-    // often. (Especially ':', but '/' is used in cache_menu.)
-    // We can't turn them back into their own characters though; both are
-    // considered unsafe in filenames. So turn ':' -> '@' and '/' -> '='
-    $safe_cid = str_replace(array('%3A', '%2F'), array('@', '='), urlencode($cid));
+    $safe_cid = $this->safeCid($cid);
     if (strlen($safe_cid) > FILECACHE_CID_FILENAME_MAX) {
       $safe_cid =
         substr($safe_cid, 0, FILECACHE_CID_FILENAME_POS_BEFORE_MD5) .
@@ -155,6 +150,48 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
     }
 
     return $safe_cid;
+  }
+
+  /**
+   * Create a sub directory
+   *   Uses up to three colons or slashes, as a sub directory. This will help
+   *   split up some bins into smaller sub directories.
+   *
+   * @param string $cid
+   *   Cache ID. Needs to be the safe cid where colon is encoded.
+   * @return string
+   *   The path to the sub directory.
+   */
+  protected function prepareSubDirectory(string $cid): string {
+    $hash = md5($cid);
+
+    $directory = $this->directory . '/' . $hash[0] . $hash[1];
+
+    if (!function_exists('file_prepare_directory')) {
+      require_once BACKDROP_ROOT . '/core/includes/file.inc';
+    }
+
+    if (!is_dir($directory) && !file_exists($directory)) {
+      file_prepare_directory($directory, FILE_CREATE_DIRECTORY);
+    }
+
+    return $directory;
+  }
+
+  /**
+   * Safe cache ID
+   *
+   * @param string $cid
+   *   Cache ID.
+   * @return string
+   */
+  protected function safeCid(string $cid): string {
+    // Use urlencode(), but turn the
+    // encoded ':' and '/' back into ordinary characters since they're used so
+    // often. (Especially ':', but '/' is used in cache_menu.)
+    // We can't turn them back into their own characters though; both are
+    // considered unsafe in filenames. So turn ':' -> '@' and '/' -> '='
+    return str_replace(array('%3A', '%2F'), array('@', '='), urlencode($cid));
   }
 
   /**
@@ -200,12 +237,13 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
       require_once BACKDROP_ROOT . '/core/includes/file.inc';
     }
 
-    $files = file_scan_directory($this->directory, '/^' . preg_quote($this->prepareCid($prefix), '/') . '.*/');
-
+    $safe_prefix = $this->prepareCid($prefix);
+    $files = file_scan_directory($this->directory, '/^' . preg_quote($safe_prefix, '/') . '.*/');
     foreach ($files as $file) {
       if (is_file($file->uri)) {
-        @unlink($file->uri);
+        @backdrop_unlink($file->uri);
         clearstatcache(FALSE, $file->uri);
+        $this->removeEmptySubDirectory($file->uri);
       }
     }
   }
@@ -214,20 +252,11 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
    * {@inheritdoc}
    */
   public function flush() {
-    if (!function_exists('file_scan_directory')) {
+    if (!function_exists('file_prepare_directory')) {
       require_once BACKDROP_ROOT . '/core/includes/file.inc';
     }
 
-    $files = file_scan_directory($this->directory, '/^.*/');
-
-    foreach ($files as $file) {
-      if (is_file($file->uri)) {
-        if (@unlink($file->uri)) {
-          clearstatcache(FALSE, $file->uri);
-        }
-      }
-    }
-    @rmdir($this->directory);
+    @file_unmanaged_delete_recursive($this->directory);
 
     file_prepare_directory($this->directory, FILE_CREATE_DIRECTORY);
   }
@@ -240,24 +269,52 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
       return;
     }
 
-    // Get current list of items.
+    // Remove expired items in the cache bin.
     if (!function_exists('file_scan_directory')) {
       require_once BACKDROP_ROOT . '/core/includes/file.inc';
     }
-    $expire_files = file_scan_directory($this->directory, '/*.expire$/');
+    $expire_files = file_scan_directory($this->directory, '/^.*\.expire$/');
     foreach ($expire_files as $file) {
       $timestamp = file_get_contents($file->uri);
       if ($timestamp < REQUEST_TIME) {
-        if (@unlink($file->uri)) {
+        if (@backdrop_unlink($file->uri)) {
           clearstatcache(FALSE, $file->uri);
         }
         $cache_path = substr($file->uri, 0, -7);
-        if (@unlink($cache_path)) {
+        if (@backdrop_unlink($cache_path)) {
           clearstatcache(FALSE, $cache_path);
         }
+        $this->removeEmptySubDirectory($file->uri);
       }
     }
 
+  }
+
+  /**
+   * Remove empty sub-directory.
+   *   This avoids removing the cache bin since it could have a large number
+   *   of directory items to check.
+   *
+   * @param string $filepath
+   */
+  protected function removeEmptySubDirectory($filepath): void {
+    // Remove subdirectory if empty.
+    $parent_directory = dirname($filepath);
+    if ($parent_directory != $this->directory) {
+      $handle = opendir($parent_directory);
+      $empty = TRUE;
+      while (FALSE !== ($entry = readdir($handle))) {
+        if ($entry != "." && $entry != "..") {
+          $empty = FALSE;
+          break;
+        }
+      }
+      closedir($handle);
+
+      if ($empty) {
+        @backdrop_rmdir($parent_directory);
+      }
+    }
   }
 
   /**
@@ -287,11 +344,23 @@ abstract class FilecacheBaseCache implements BackdropCacheInterface {
 class FilecacheCache extends FilecacheBaseCache {
 
   /**
+   * Get file path
+   *
+   * @param string $cid
+   *
+   * @return string
+   *   File path.
+   */
+  protected function getFilePath(string $cid): string {
+    $cid = $this->prepareCid($cid);
+    return $this->prepareSubDirectory($cid) . '/' . $cid;
+  }
+
+  /**
    * {@inheritdoc}
    */
   public function get($cid) {
-    $cid = $this->prepareCid($cid);
-    $filepath = $this->directory . '/' . $cid;
+    $filepath = $this->getFilePath($cid);
     if (file_exists($filepath)) {
       $cache = $this->getContents($filepath);
       if (!empty($cache)) {
@@ -342,6 +411,7 @@ class FilecacheCache extends FilecacheBaseCache {
    * {@inheritdoc}
    */
   public function set($cid, $data, $expire = CACHE_PERMANENT) {
+    $filepath = $this->getFilePath($cid);
     $cid = $this->prepareCid($cid);
     $cache = new StdClass;
     $cache->cid = $cid;
@@ -350,7 +420,6 @@ class FilecacheCache extends FilecacheBaseCache {
     $cache->data = $data;
     try {
       $cache = serialize($cache);
-      $filepath = $this->directory . '/' . $cid;
 
       file_put_contents($filepath, $cache, LOCK_EX);
       backdrop_chmod($filepath);
@@ -369,14 +438,13 @@ class FilecacheCache extends FilecacheBaseCache {
    */
   public function deleteMultiple(array $cids) {
     foreach ($cids as $cid) {
-      $cid = $this->prepareCid($cid);
-      $filepath = $this->directory . '/' . $cid;
+      $filepath = $this->getFilePath($cid);
       if (is_file($filepath)) {
-        @unlink($filepath);
+        @backdrop_unlink($filepath);
         clearstatcache(FALSE, $filepath);
       }
       if (is_file($filepath . '.expire')) {
-        @unlink($filepath . '.expire');
+        @backdrop_unlink($filepath . '.expire');
         clearstatcache(FALSE, $filepath . '.expire');
       }
     }
@@ -398,12 +466,25 @@ class FilecacheCache extends FilecacheBaseCache {
 class FilecachePhpCache extends FilecacheBaseCache {
 
   /**
+   * Get file path
+   *
+   * @param string $cid
+   *
+   * @return string
+   *   File path.
+   */
+  protected function getFilePath(string $cid): string {
+    $cid = $this->prepareCid($cid);
+    return $this->prepareSubDirectory($cid) . '/' . $cid . '.php';
+  }
+
+  /**
    * {@inheritdoc}
    */
   public function get($cid) {
-    $cid = $this->prepareCid($cid);
-    if (file_exists($this->directory . '/' . $cid . '.php')) {
-      include $this->directory . '/' . $cid . '.php';
+    $filepath = $this->getFilePath($cid);
+    if (file_exists($filepath)) {
+      include $filepath;
       if (isset($cache)) {
         $item = $this->prepareItem($cache);
         if (!$item) {
@@ -429,6 +510,7 @@ class FilecachePhpCache extends FilecacheBaseCache {
    * {@inheritdoc}
    */
   public function set($cid, $data, $expire = CACHE_PERMANENT) {
+    $filepath = $this->getFilePath($cid);
     $cid = $this->prepareCid($cid);
     $cache = new StdClass;
     $cache->cid = $cid;
@@ -437,7 +519,6 @@ class FilecachePhpCache extends FilecacheBaseCache {
     $cache->data = $data;
     try {
       $cache = '<?php $cache=\'' . base64_encode(serialize($cache)) . '\';';
-      $filepath = $this->directory . '/' . $cid . '.php';
 
       file_put_contents($filepath, $cache, LOCK_EX);
       backdrop_chmod($filepath);
@@ -456,14 +537,14 @@ class FilecachePhpCache extends FilecacheBaseCache {
    */
   public function deleteMultiple(array $cids) {
     foreach ($cids as $cid) {
+      $filepath = $this->getFilePath($cid);
       $cid = $this->prepareCid($cid);
-      $filepath = $this->directory . '/' . $cid . '.php';
       if (is_file($filepath)) {
-        @unlink($filepath);
+        @backdrop_unlink($filepath);
         clearstatcache(FALSE, $filepath);
       }
       if (is_file($filepath . '.expire')) {
-        @unlink($filepath . '.expire');
+        @backdrop_unlink($filepath . '.expire');
         clearstatcache(FALSE, $filepath . '.expire');
       }
     }
